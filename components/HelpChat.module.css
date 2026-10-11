@@ -711,6 +711,296 @@
   transition-duration: 0.12s;
 }
 
+/* ───────────── aulas em vídeo (YouTube) ───────────── */
+
+/* bolinha de play dos chips "Aulas em vídeo" */
+.chipAula {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 7px;
+}
+.playDot {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: linear-gradient(150deg, #ff4d5e 0%, #e8102b 60%, #c4002a 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.playDot svg {
+  margin-left: 1px;
+}
+.faqIconAula {
+  color: #e8102b;
+  background: rgba(232, 16, 43, 0.1);
+}
+
+/* lista de aulas: miniatura da capa + nome + duração */
+.aulaRowThumb {
+  position: relative;
+  flex: none;
+  width: 50px;
+  height: 28px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #0b0b0d;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.aulaRowThumb img,
+.aulaThumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.aulaThumbPlay {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: #e8102b;
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.6);
+}
+.aulaThumbPlay svg {
+  margin-left: 1px;
+}
+.aulaRowTime {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--text-dim));
+}
+.aulaHere {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  vertical-align: 1px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgb(var(--violet));
+  background: rgb(var(--violet) / 0.12);
+}
+
+/* cartão da aula */
+.aula {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 18px 18px 18px 6px;
+  background: rgb(var(--bg-softer));
+  box-shadow: inset 0 0 0 1px rgb(var(--line-strong) / 0.8);
+  animation: hcIn 0.45s var(--hc-spring) both;
+}
+.aulaCover {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #0b0b0d;
+}
+.aulaCover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.6s var(--hc-spring);
+}
+.aulaCover:hover img {
+  transform: scale(1.03);
+}
+/* pílula escura sobre a capa: cor fixa (fica em cima do próprio vídeo, nos 2 temas) */
+.aulaPill {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(12, 10, 18, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 10px 24px -10px rgba(0, 0, 0, 0.7),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+.aulaPillPlay {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: linear-gradient(150deg, #ff4d5e 0%, #e8102b 60%, #c4002a 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.aulaPillPlay svg {
+  margin-left: 1px;
+}
+.aulaPillTime {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.aulaBody {
+  padding: 12px 14px 14px;
+}
+.aulaMeta {
+  margin: 0 0 3px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgb(var(--text-muted));
+}
+.aulaTitle {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+  color: rgb(var(--text));
+}
+/* botão vermelho do YouTube: o que a pessoa procura pra assistir */
+.yt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 5px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  background: linear-gradient(150deg, #ff4d5e 0%, #e8102b 52%, #b8001f 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -2px 6px rgba(90, 0, 14, 0.35),
+    0 12px 26px -12px rgba(232, 16, 43, 0.75);
+  transition:
+    transform 0.5s var(--hc-spring),
+    box-shadow 0.4s var(--hc-spring);
+}
+.yt:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -2px 6px rgba(90, 0, 14, 0.35),
+    0 16px 30px -12px rgba(232, 16, 43, 0.9);
+}
+.yt:active {
+  transform: scale(0.98);
+  transition-duration: 0.12s;
+}
+.ytIcon {
+  --yt-play: #e8102b;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.26);
+}
+.ytText {
+  flex: 1;
+}
+.ytArrow {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(60, 0, 10, 0.22);
+  transition: transform 0.5s var(--hc-spring);
+}
+.yt:hover .ytArrow {
+  transform: translate(2px, -2px) scale(1.06);
+}
+.aulaTool {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  margin-left: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  color: rgb(var(--violet));
+  transition: gap 0.4s var(--hc-spring);
+}
+.aulaTool:hover {
+  gap: 7px;
+}
+
+/* aula dentro de uma resposta (ex.: Chaves de IA) */
+.aulaInline {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-top: 12px;
+  padding: 7px 10px 7px 7px;
+  border-radius: 13px;
+  text-decoration: none;
+  color: rgb(var(--text));
+  background: rgba(232, 16, 43, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(232, 16, 43, 0.28);
+  transition:
+    background 0.3s var(--hc-spring),
+    box-shadow 0.3s var(--hc-spring);
+}
+.aulaInline:hover {
+  background: rgba(232, 16, 43, 0.11);
+  box-shadow: inset 0 0 0 1px rgba(232, 16, 43, 0.55);
+}
+.aulaThumb {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 36px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0b0b0d;
+}
+.aulaInlineText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.aulaInlineTitle {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.aulaInlineMeta {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: rgb(var(--text-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aulaInlineYt {
+  --yt-play: #fff;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: #e8102b;
+}
+
 /* cartão da mensagem pronta → WhatsApp */
 .cta {
   width: 100%;
@@ -947,7 +1237,8 @@
   .chip,
   .cta,
   .faqRow,
-  .answer {
+  .answer,
+  .aula {
     animation: none;
   }
   .panel,

@@ -9,7 +9,14 @@
  * entrega o link do WhatsApp com ela já escrita. Tudo aqui é sem DOM pra poder
  * ser testado em node (lib/help-chat.test.ts), inclusive a garantia de que todo
  * botão citado entre aspas existe de verdade na tela.
+ *
+ * 11.10: as AULAS EM VÍDEO (lib/aulas-video.ts, YouTube não listado) entram no
+ * chat: botão "Assistir no YouTube" na dúvida de uma ferramenta, na resposta
+ * das Chaves de IA e numa lista de aulas. Mesma trava do "Como usar": aula de
+ * ferramenta paga só pra quem tem acesso a ela, e aula sem id (ainda não
+ * publicada) não aparece.
  */
+import { AULAS_VIDEO, aulaDaRota } from './aulas-video';
 import { HISTORY_TOOLS, historyToolLabel } from './history-tools';
 
 /** Número do suporte (o mesmo do antigo botão verde do WhatsApp). */
@@ -132,6 +139,11 @@ export type HelpArticle = {
    * resolveu?", o chat oferece mandar o pedido pronto no WhatsApp.
    */
   request?: { text: string; button: string };
+  /**
+   * Aula em vídeo que acompanha a resposta (rota em lib/aulas-video.ts).
+   * 'atual' = a aula da ferramenta aberta na tela, se houver.
+   */
+  aula?: string | 'atual';
   /** sugestões de "o que aconteceu" quando a pessoa ainda precisa do suporte */
   stuck: string[];
 };
@@ -313,6 +325,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
     ],
     link: { label: 'Abrir Chaves de IA', href: '/configuracoes/api' },
     needsLogin: true,
+    aula: '/configuracoes/api',
     stuck: ['Salvei e a ferramenta ainda pede a chave', 'Não sei qual chave criar'],
   },
   {
@@ -323,8 +336,9 @@ export const HELP_ARTICLES: HelpArticle[] = [
     steps: [
       'Abra a ferramenta que você quer usar.',
       'No canto de cima, à direita, toque em "Como usar" (o ícone de livro).',
-      'Abre o passo a passo da ferramenta, com tudo que você precisa fazer.',
+      'Abre o passo a passo da ferramenta e, quando ela tem, a aula em vídeo.',
     ],
+    aula: 'atual',
     stuck: ['A ferramenta não tem o botão "Como usar"', 'Segui o passo a passo e não deu certo'],
   },
   {
@@ -346,21 +360,134 @@ export function articleById(id: HelpArticleId | null | undefined): HelpArticle |
   return HELP_ARTICLES.find((a) => a.id === id) ?? null;
 }
 
-export type ArticleView = { intro?: string; steps: string[]; note?: string; link?: HelpLink };
+export type ArticleView = { intro?: string; steps: string[]; note?: string; link?: HelpLink; aula?: AulaDoChat | null };
 
 /**
  * O que o cartão de resposta mostra pra ESTA pessoa: deslogado ganha o passo
  * "Entre na sua conta." quando a resposta acontece dentro dela; quem já está
- * numa ferramenta com guia fica sabendo que o botão está na própria tela.
+ * numa ferramenta com guia fica sabendo que o botão está na própria tela; e a
+ * aula em vídeo da resposta só entra se ela puder ver (`aula`, já filtrada).
  */
-export function articleView(a: HelpArticle, ctx: { logged: boolean; hasGuide?: boolean }): ArticleView {
+export function articleView(
+  a: HelpArticle,
+  ctx: { logged: boolean; hasGuide?: boolean; aula?: AulaDoChat | null },
+): ArticleView {
   const steps = a.needsLogin && !ctx.logged ? ['Entre na sua conta.', ...a.steps] : [...a.steps];
   let note = a.note;
   if (a.id === 'como-usar' && ctx.hasGuide) {
-    note = 'A ferramenta que você está usando agora tem esse guia: o botão fica aí no canto de cima, à direita.';
+    note = ctx.aula
+      ? 'A ferramenta que você está usando agora tem guia e aula em vídeo: a aula está aqui embaixo.'
+      : 'A ferramenta que você está usando agora tem esse guia: o botão fica aí no canto de cima, à direita.';
   }
-  return { intro: a.intro, steps, note, link: a.link };
+  return { intro: a.intro, steps, note, link: a.link, aula: ctx.aula ?? null };
 }
+
+// ─── aulas em vídeo (YouTube) ───────────────────────────────────────────────
+
+export type AulaDoChat = {
+  /** rota da ferramenta (chave de AULAS_VIDEO) */
+  path: string;
+  /** nome curto, do jeito que a pessoa vê no site: "Legendas Automáticas" */
+  label: string;
+  /** título da aula no YouTube: "Como usar as Legendas Automáticas" */
+  titulo: string;
+  duracao: string;
+  capa: string;
+  /** link do vídeo no YouTube (não listado: só abre com o link) */
+  url: string;
+};
+
+/** Nome curto da aula: o mesmo nome da ferramenta no site. */
+export function aulaLabel(path: string): string {
+  const m = /^\/tools\/([^/?#]+)/.exec(path);
+  if (m) {
+    const label = historyToolLabel(decodeURIComponent(m[1]));
+    if (label && label !== m[1]) return label;
+  }
+  if (path === '/configuracoes/api') return 'Chaves de IA';
+  const titulo = AULAS_VIDEO[path]?.titulo ?? path;
+  return titulo.replace(/^como (instalar e )?(usar|configurar) (o|a|as|os) /i, '');
+}
+
+export function aulaYoutubeUrl(id: string): string {
+  return `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
+}
+
+/**
+ * Aula da rota pra ESTA pessoa. `pode(path)` é a trava de acesso (a mesma do
+ * AulaVideo: aula de ferramenta paga só com o plano que libera a ferramenta);
+ * aula sem id ainda não foi publicada e não aparece.
+ */
+export function aulaDoChat(path: string | null | undefined, pode: (path: string) => boolean): AulaDoChat | null {
+  const a = aulaDaRota(path);
+  if (!a || !path || !pode(path)) return null;
+  return { path, label: aulaLabel(path), titulo: a.titulo, duracao: a.duracao, capa: a.capa, url: aulaYoutubeUrl(a.id) };
+}
+
+/** Todas as aulas que ESTA pessoa pode ver; a da ferramenta aberta vem primeiro. */
+export function aulasDisponiveis(pode: (path: string) => boolean, atual?: string | null): AulaDoChat[] {
+  const todas = Object.keys(AULAS_VIDEO)
+    .map((p) => aulaDoChat(p, pode))
+    .filter((a): a is AulaDoChat => !!a);
+  const i = todas.findIndex((a) => a.path === atual);
+  if (i > 0) todas.unshift(...todas.splice(i, 1));
+  return todas;
+}
+
+/** Rota da ferramenta citada num texto ("como uso o lipsync" → /tools/lipsync). */
+export function toolPathMentioned(texto: string): string | null {
+  const label = toolMentioned(texto);
+  if (label) {
+    const t = HISTORY_TOOLS.find((x) => x.label === label);
+    if (t) return `/tools/${t.id}`;
+  }
+  if (/\bchaves?\b|\bapi\b/.test(sem(texto))) return '/configuracoes/api';
+  return null;
+}
+
+/** A pessoa pediu vídeo/aula/tutorial ("tem aula?", "vídeo de como usa"). Só "vídeo" não basta: "meu vídeo travou" é erro. */
+export function pedeAula(texto: string): boolean {
+  const t = sem(texto);
+  return /\b(aula|aulas|videoaula|videoaulas|tutorial|tutoriais|youtube)\b|\bvideos? (aula|de como|ensinando|explicando|tutorial|mostrando)\b|\bassistir\b/.test(
+    t,
+  );
+}
+
+/**
+ * O que um texto livre pede em matéria de aula:
+ * - `{ uma: rota }`: aula de UMA ferramenta (citada no texto, ou a da tela
+ *   quando a pessoa só pediu "aula") — quem chama confere se ela pode ver;
+ * - `'lista'`: pediu aula sem dizer de quê, fora de uma ferramenta com aula;
+ * - `null`: não é sobre aula (segue o fluxo normal).
+ * "como usar o downloader" também cai aqui quando o Downloader tem aula.
+ */
+export function aulaPedida(texto: string, atual?: string | null): { uma: string } | 'lista' | null {
+  const citada = toolPathMentioned(texto);
+  if (pedeAula(texto)) {
+    if (citada && AULAS_VIDEO[citada]) return { uma: citada };
+    if (!citada && atual && aulaDaRota(atual)) return { uma: atual };
+    return 'lista';
+  }
+  if (citada && citada.startsWith('/tools/') && aulaDaRota(citada) && findArticle(texto)?.id === 'como-usar') {
+    return { uma: citada };
+  }
+  return null;
+}
+
+/** Por que a aula de uma rota aparece (ok) ou não pra esta pessoa. */
+export function aulaStatus(path: string, pode: (path: string) => boolean): 'ok' | 'sem-video' | 'bloqueada' | 'nao-existe' {
+  if (!AULAS_VIDEO[path]) return 'nao-existe';
+  if (!aulaDaRota(path)) return 'sem-video';
+  return pode(path) ? 'ok' : 'bloqueada';
+}
+
+/** Assunto da mensagem pro suporte depois de uma aula. */
+export function aulaSubject(a: Pick<AulaDoChat, 'label'>): string {
+  return `Dúvida sobre ${a.label}`;
+}
+
+/** Sugestões de relato quando a pessoa viu a aula e ainda precisa do suporte. */
+export const AULA_STUCK = ['Assisti e ainda tenho dúvida', 'A ferramenta deu erro', 'O vídeo não abre'];
 
 const sem = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -549,6 +676,8 @@ export type SupportMessageInput = {
   topic?: HelpTopicId | null;
   /** resposta do chat que a pessoa leu antes de pedir o suporte: vira o Assunto */
   article?: HelpArticleId | null;
+  /** assunto pronto, quando não veio de uma resposta (ex.: "Dúvida sobre Legendas Automáticas", depois da aula) */
+  subject?: string | null;
   description: string;
   /** página onde a pessoa estava: só serve pra saber a FERRAMENTA, não vai na mensagem */
   pathname?: string | null;
@@ -575,9 +704,10 @@ export function buildSupportMessage(i: SupportMessageInput): string {
   const desc = cleanText(i.description);
   const topic = topicById(i.topic);
   const article = articleById(i.article);
+  const subject = (i.subject || '').trim();
 
-  let assunto = article ? article.subject : topic ? ASSUNTO[topic.id] : null;
-  if (!article && topic?.id === 'ferramenta') {
+  let assunto = article ? article.subject : subject || (topic ? ASSUNTO[topic.id] : null);
+  if (!article && !subject && topic?.id === 'ferramenta') {
     // a ferramenta citada no relato manda; senão, a da página, a menos que a
     // pessoa tenha respondido "não" ao "Foi na ferramenta X?"
     const negou = /^n(a|ã)o\b/i.test(desc);
