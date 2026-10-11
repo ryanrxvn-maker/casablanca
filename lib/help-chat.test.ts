@@ -9,12 +9,22 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { AULAS_VIDEO } from './aulas-video';
 import {
+  AULA_STUCK,
   HELP_ARTICLES,
   HELP_TOPICS,
   HOME_ARTICLES,
   articleById,
   articleView,
+  aulaDoChat,
+  aulaLabel,
+  aulaPedida,
+  aulaStatus,
+  aulaSubject,
+  aulasDisponiveis,
+  pedeAula,
+  toolPathMentioned,
   buildSupportMessage,
   cleanText,
   detectTopic,
@@ -377,6 +387,87 @@ for (const a of HELP_ARTICLES) {
     const m = buildSupportMessage({ name: 'Ana', email: 'a@b.co', topic: a.topic, article: a.id, description: st, pathname: '/tools/lipsync' });
     ok(!/undefined|null|Página/.test(m) && m.includes(`Assunto: ${a.subject}\n`), `"${a.title}" + "${st}" sai limpa`, m);
   }
+}
+
+console.log('help-chat: aulas em vídeo');
+const rotas = Object.keys(AULAS_VIDEO);
+const publicadas = rotas.filter((p) => !!AULAS_VIDEO[p].id);
+const pendentes = rotas.filter((p) => !AULAS_VIDEO[p].id);
+const todas = () => true;
+const nenhuma = () => false;
+const so = (...ps: string[]) => (p: string) => ps.includes(p);
+ok(publicadas.length >= 1, 'tem aula publicada');
+for (const p of rotas) {
+  const aula = AULAS_VIDEO[p];
+  const label = aulaLabel(p);
+  ok(!!label && !/^como /i.test(label) && !/[—–]/.test(label), `aula ${p}: nome curto "${label}"`);
+  ok(fs.existsSync(path.join(process.cwd(), 'public', aula.capa)), `aula ${p}: capa ${aula.capa} existe`);
+  ok(fs.existsSync(path.join(process.cwd(), 'app', p, 'page.tsx')), `aula ${p}: a página ${p} existe (link "Abrir")`);
+  ok(/^\d+:\d\d$/.test(aula.duracao), `aula ${p}: duração no formato do YouTube`);
+}
+eq(aulaLabel('/tools/tipografia'), 'Legendas Automáticas', 'nome da aula = nome da ferramenta no site');
+eq(aulaLabel('/configuracoes/api'), 'Chaves de IA', 'aula das chaves');
+for (const p of publicadas) {
+  const a = aulaDoChat(p, todas)!;
+  ok(!!a && a.url === `https://www.youtube.com/watch?v=${AULAS_VIDEO[p].id}`, `aula ${p}: link do YouTube com o id`);
+  eq(aulaDoChat(p, nenhuma), null, `aula ${p}: sem acesso, não aparece`);
+}
+for (const p of pendentes) eq(aulaDoChat(p, todas), null, `aula ${p}: sem id (não publicada) não aparece`);
+eq(aulasDisponiveis(todas).length, publicadas.length, 'lista = todas as publicadas');
+eq(aulasDisponiveis(nenhuma).length, 0, 'sem acesso a nada: lista vazia');
+const outra = publicadas[publicadas.length - 1];
+eq(aulasDisponiveis(todas, outra)[0].path, outra, 'a aula da ferramenta aberta vem primeiro');
+eq(new Set(aulasDisponiveis(todas, outra).map((a) => a.path)).size, publicadas.length, 'sem aula repetida ao reordenar');
+const free = so('/tools/decupagem', '/tools/compressor', '/tools/fakepass', '/tools/downloader');
+ok(aulasDisponiveis(free).every((a) => free(a.path)), 'plano grátis: só aula de ferramenta grátis');
+eq(aulaStatus('/tools/tipografia', todas), AULAS_VIDEO['/tools/tipografia'].id ? 'ok' : 'sem-video', 'status ok');
+eq(aulaStatus('/tools/tipografia', nenhuma), AULAS_VIDEO['/tools/tipografia'].id ? 'bloqueada' : 'sem-video', 'status bloqueada');
+eq(aulaStatus('/tools/historico', todas), 'nao-existe', 'status sem aula cadastrada');
+for (const p of pendentes) eq(aulaStatus(p, todas), 'sem-video', `status ${p} sem vídeo ainda`);
+
+// texto livre que pede aula
+for (const x of ['tem aula?', 'tem vídeo aula?', 'quero ver o tutorial', 'tem vídeo de como usa?', 'onde assisto a aula', 'link do youtube']) ok(pedeAula(x), `"${x}" pede aula`);
+for (const x of ['meu vídeo travou', 'o vídeo não baixa', 'como cancelo', 'esqueci minha senha']) ok(!pedeAula(x), `"${x}" não é pedido de aula`);
+eq(toolPathMentioned('aula do downloader'), '/tools/downloader', 'ferramenta citada vira rota');
+eq(toolPathMentioned('vídeo das chaves de api'), '/configuracoes/api', 'chave/api = aula das Chaves de IA');
+eq(toolPathMentioned('meu vídeo travou'), null, 'sem ferramenta citada');
+const comAula = publicadas.find((p) => p.startsWith('/tools/'))!;
+const nomeComAula = aulaLabel(comAula);
+eq(JSON.stringify(aulaPedida(`tem aula do ${nomeComAula}?`)), JSON.stringify({ uma: comAula }), `"tem aula do ${nomeComAula}?" = a aula dela`);
+eq(JSON.stringify(aulaPedida('tem aula?', comAula)), JSON.stringify({ uma: comAula }), '"tem aula?" dentro da ferramenta = a aula dela');
+eq(aulaPedida('tem aula?', '/tools/historico'), 'lista', '"tem aula?" fora de ferramenta com aula = lista');
+eq(aulaPedida('quero ver as aulas'), 'lista', '"quero ver as aulas" = lista');
+eq(JSON.stringify(aulaPedida(`como uso o ${nomeComAula}?`)), JSON.stringify({ uma: comAula }), '"como uso o X" = aula do X, se ela existe');
+eq(aulaPedida('como uso o pilot?'), null, '"como uso" de ferramenta sem aula segue pro texto');
+eq(aulaPedida('quero cancelar minha assinatura'), null, 'pagamento não vira aula');
+eq(aulaPedida('meu vídeo travou no processamento'), null, 'erro com "vídeo" não vira aula');
+eq(JSON.stringify(aulaPedida('tem aula de chave de api?')), JSON.stringify({ uma: '/configuracoes/api' }), 'aula das chaves');
+
+// resposta com aula: Chaves de IA leva a aula quando ela existe e a pessoa pode ver
+const chave = articleById('chave-ia')!;
+eq(chave.aula, '/configuracoes/api', 'Chaves de IA aponta pra aula das chaves');
+eq(articleById('como-usar')!.aula, 'atual', 'Como usar aponta pra aula da ferramenta aberta');
+const aulaChaves = aulaDoChat('/configuracoes/api', todas);
+eq(articleView(chave, { logged: true, aula: aulaChaves }).aula?.path ?? null, aulaChaves?.path ?? null, 'cartão das chaves mostra a aula (quando publicada)');
+ok(
+  /aula está aqui embaixo/.test(articleView(articleById('como-usar')!, { logged: true, hasGuide: true, aula: aulaDoChat(comAula, todas) }).note ?? ''),
+  'como usar dentro da ferramenta com aula: avisa que a aula está no cartão',
+);
+
+// mensagem pro suporte depois da aula
+const aulaX = aulaDoChat(comAula, todas)!;
+eq(aulaSubject(aulaX), `Dúvida sobre ${nomeComAula}`, 'assunto depois da aula');
+eq(
+  buildSupportMessage({ email: 'a@b.co', topic: 'duvida', subject: aulaSubject(aulaX), description: 'Assisti e ainda tenho dúvida', pathname: '/' }),
+  `Olá, suporte do Auto Edit!\n\nConta: a@b.co\nAssunto: Dúvida sobre ${nomeComAula}\nMinha dúvida: Assisti e ainda tenho dúvida.\n\nPodem me ajudar?`,
+  'mensagem depois da aula: assunto da aula + a dúvida',
+);
+ok(
+  buildSupportMessage({ topic: 'ferramenta', subject: 'Dúvida sobre X', description: 'travou', pathname: comAula }).includes('Assunto: Dúvida sobre X\n'),
+  'assunto pronto vence o "Erro na ferramenta" da página',
+);
+for (const st of AULA_STUCK) {
+  ok(!isThanks(st) && !isGiveUp(st) && !isYes(st) && !isNo(st) && !pedeAula(st), `"${st}" é relato, não resposta curta nem pedido de aula`);
 }
 
 console.log('help-chat: guardas de layout');

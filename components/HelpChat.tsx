@@ -1,18 +1,26 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { DarkoLogo } from './DarkoLogo';
 import { GUIDE_PATHS } from './tool-guides/routes';
+import { tierAllowsTool, useTier, type Tier } from '@/lib/use-tier';
 import {
+  AULA_STUCK,
   HELP_CHAT_EVENT,
   HELP_TOPICS,
   HOME_ARTICLES,
   MAX_DESCRICAO,
   articleById,
   articleView,
+  aulaDoChat,
+  aulaLabel,
+  aulaPedida,
+  aulaStatus,
+  aulaSubject,
+  aulasDisponiveis,
   buildSupportMessage,
   cleanText,
   detectTopic,
@@ -29,6 +37,7 @@ import {
   whatsappUrl,
   wordCount,
   type ArticleView,
+  type AulaDoChat,
   type HelpArticle,
   type HelpArticleId,
   type HelpTopic,
@@ -50,6 +59,11 @@ import s from './HelpChat.module.css';
  *
  * Outras telas abrem o chat com `openHelpChat('<resposta>')` (lib/help-chat).
  *
+ * Aulas em vídeo (11.10): cartão da aula com a capa e "Assistir no YouTube"
+ * (lista em "Aulas em vídeo", a da ferramenta aberta primeiro). A trava é a
+ * mesma do "Como usar": o plano vem do useTier, montado SÓ quando o chat abre
+ * (nenhuma consulta a mais no carregamento das páginas).
+ *
  * Montado no layout raiz (todas as páginas). O pulso do botão é enfeite →
  * `ae-ambient` (pausa no modo descanso, ver AmbientCalm).
  */
@@ -58,7 +72,8 @@ type NewMsg =
   | { kind: 'bot'; text: string }
   | { kind: 'user'; text: string }
   | { kind: 'cta'; message: string }
-  | { kind: 'answer'; title: string; view: ArticleView };
+  | { kind: 'answer'; title: string; view: ArticleView }
+  | { kind: 'aula'; aula: AulaDoChat };
 type Msg = NewMsg & { id: number };
 
 type Chips =
@@ -66,8 +81,10 @@ type Chips =
   | { kind: 'items'; topic: HelpTopicId }
   | { kind: 'quick'; items: string[]; skip?: boolean }
   | { kind: 'email' }
-  | { kind: 'resolve'; article: HelpArticleId }
+  /** "Isso resolveu?": depois de uma resposta (article) ou de uma aula (aula = rota) */
+  | { kind: 'resolve'; article?: HelpArticleId; aula?: AulaDoChat; maisAulas?: boolean }
   | { kind: 'request'; article: HelpArticleId }
+  | { kind: 'aulas'; items: AulaDoChat[] }
   | { kind: 'after' }
   | { kind: 'done' }
   | null;
@@ -79,6 +96,10 @@ type Convo = {
   topic: HelpTopicId | null;
   /** resposta do chat que a pessoa leu: vira o Assunto se ela ainda precisar do suporte */
   article: HelpArticleId | null;
+  /** assunto pronto quando não veio de uma resposta (depois de uma aula) */
+  subject: string | null;
+  /** aula que a pessoa acabou de ver no chat */
+  aula: AulaDoChat | null;
   description: string;
   email: string | null;
   path: string | null;
@@ -105,10 +126,13 @@ const PLACEHOLDER: Record<Stage, string> = {
 const RESOLVED = 'Resolveu, obrigado!';
 const TO_SUPPORT = 'Falar com o suporte';
 const SKIP_DETAILS = 'Prefiro explicar no WhatsApp';
+const VER_AULAS = 'Ver as aulas em vídeo';
 
 const freshConvo = (email: string | null = null): Convo => ({
   topic: null,
   article: null,
+  subject: null,
+  aula: null,
   description: '',
   email,
   path: null,
@@ -258,8 +282,26 @@ function TopicIcon({ id }: { id: HelpTopicId }) {
   }
 }
 
-/** linha da lista: resposta que o chat dá (lâmpada) x pedido que vai pro suporte (balão) */
-function RowIcon({ kind }: { kind: 'answer' | 'support' }) {
+/** bolinha de play dos chips de aula */
+function PlayDot() {
+  return (
+    <span className={s.playDot} aria-hidden="true">
+      <svg width="8" height="8" viewBox="0 0 24 24">
+        <path d="M8 5.5v13l10.5-6.5L8 5.5Z" fill="#fff" />
+      </svg>
+    </span>
+  );
+}
+
+/** linha da lista: resposta que o chat dá (lâmpada), pedido que vai pro suporte (balão) ou aula (play) */
+function RowIcon({ kind }: { kind: 'answer' | 'support' | 'aula' }) {
+  if (kind === 'aula') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 5.5v13l10.5-6.5L8 5.5Z" fill="currentColor" />
+      </svg>
+    );
+  }
   return kind === 'answer' ? (
     <LineIcon size={16}>
       <path d="M9.4 17.6h5.2M10.2 20.4h3.6" />
@@ -276,6 +318,106 @@ function RowIcon({ kind }: { kind: 'answer' | 'support' }) {
 function rich(text: string): ReactNode {
   const parts = text.split(/"([^"]+)"/);
   return parts.map((p, i) => (i % 2 ? <strong key={i}>{p}</strong> : p));
+}
+
+/** Ícone do YouTube (retângulo arredondado + play), pintado pela cor do texto. */
+function YoutubeGlyph({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="1.6" y="4.6" width="20.8" height="14.8" rx="4.4" fill="currentColor" />
+      <path d="M10 8.9v6.2l5.4-3.1L10 8.9Z" fill="var(--yt-play, #e8102b)" />
+    </svg>
+  );
+}
+
+// ─── aula em vídeo (YouTube) ────────────────────────────────────────────────
+
+/** Rótulo do link pra abrir a página da aula ("Abrir a ferramenta" / "Abrir Chaves de IA"). */
+const abrirLabel = (a: AulaDoChat) => (a.path.startsWith('/tools/') ? 'Abrir a ferramenta' : `Abrir ${a.label}`);
+
+/**
+ * Cartão da aula: a capa (cartela da própria aula) e o botão vermelho
+ * "Assistir no YouTube", que abre o vídeo numa aba nova (no celular, no app
+ * do YouTube). O vídeo é não listado: só chega nele quem tem o link.
+ */
+function AulaCard({ aula, atual, onLink }: { aula: AulaDoChat; atual: string | null; onLink: () => void }) {
+  return (
+    <div className={s.aula} data-testid="help-chat-aula">
+      <a
+        className={s.aulaCover}
+        href={aula.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Assistir no YouTube: ${aula.titulo} (${aula.duracao})`}
+        tabIndex={-1}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={aula.capa} alt="" loading="lazy" decoding="async" />
+        <span className={s.aulaPill} aria-hidden="true">
+          <span className={s.aulaPillPlay}>
+            <svg width="11" height="11" viewBox="0 0 24 24">
+              <path d="M8 5.5v13l10.5-6.5L8 5.5Z" fill="#fff" />
+            </svg>
+          </span>
+          <span className={s.aulaPillTime}>{aula.duracao}</span>
+        </span>
+      </a>
+      <div className={s.aulaBody}>
+        <p className={s.aulaMeta}>Aula em vídeo · {aula.duracao}</p>
+        <p className={s.aulaTitle}>{aula.titulo}</p>
+        <a className={s.yt} href={aula.url} target="_blank" rel="noopener noreferrer" data-testid="help-chat-aula-youtube">
+          <span className={s.ytIcon}>
+            <YoutubeGlyph size={20} />
+          </span>
+          <span className={s.ytText}>Assistir no YouTube</span>
+          <span className={s.ytArrow}>
+            <LineIcon size={15} d="M7.5 16.5 16.5 7.5M9 7.5h7.5V15" />
+          </span>
+        </a>
+        {atual !== aula.path ? (
+          <Link href={aula.path} className={s.aulaTool} onClick={onLink}>
+            {abrirLabel(aula)}
+            <LineIcon size={13} d="m9.5 6.5 5.5 5.5-5.5 5.5" />
+          </Link>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** A aula dentro de uma resposta do chat (ex.: Chaves de IA): uma linha com capa + YouTube. */
+function AulaInline({ aula }: { aula: AulaDoChat }) {
+  return (
+    <a className={s.aulaInline} href={aula.url} target="_blank" rel="noopener noreferrer" data-testid="help-chat-aula-inline">
+      <span className={s.aulaThumb}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={aula.capa} alt="" loading="lazy" decoding="async" />
+        <span className={s.aulaThumbPlay} aria-hidden="true">
+          <svg width="9" height="9" viewBox="0 0 24 24">
+            <path d="M8 5.5v13l10.5-6.5L8 5.5Z" fill="#fff" />
+          </svg>
+        </span>
+      </span>
+      <span className={s.aulaInlineText}>
+        <span className={s.aulaInlineTitle}>Assistir à aula no YouTube</span>
+        <span className={s.aulaInlineMeta}>
+          {aula.titulo} · {aula.duracao}
+        </span>
+      </span>
+      <span className={s.aulaInlineYt}>
+        <YoutubeGlyph size={22} />
+      </span>
+    </a>
+  );
+}
+
+/** Lê o plano da conta (useTier) e avisa o chat. Só monta com o chat aberto. */
+function TierProbe({ onTier }: { onTier: (t: Tier | null) => void }) {
+  const tier = useTier();
+  useEffect(() => {
+    onTier(tier);
+  }, [tier, onTier]);
+  return null;
 }
 
 // ─── cartão de resposta (o passo a passo que o chat ensina) ──────────────────
@@ -296,6 +438,7 @@ function AnswerCard({ title, view, onLink }: { title: string; view: ArticleView;
         ))}
       </ol>
       {view.note ? <p className={s.answerNote}>{rich(view.note)}</p> : null}
+      {view.aula ? <AulaInline aula={view.aula} /> : null}
       {view.link ? (
         <Link href={view.link.href} className={s.answerLink} onClick={onLink} data-testid="help-chat-answer-link">
           <span>{view.link.label}</span>
@@ -401,6 +544,13 @@ export function HelpChat() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** pedido de outra tela (openHelpChat): sempre a versão mais nova das funções abaixo */
   const externalOpen = useRef<(article: HelpArticleId | null) => void>(() => {});
+  // plano da conta (trava das aulas): vem do TierProbe, que só monta com o chat aberto
+  const [tier, setTier] = useState<Tier | null>(null);
+  const tierRef = useRef<Tier | null>(null);
+  const onTier = useCallback((t: Tier | null) => {
+    tierRef.current = t;
+    setTier(t);
+  }, []);
   const uid = useId();
   const panelId = `help-chat-${uid.replace(/:/g, '')}`;
   const titleId = `${panelId}-title`;
@@ -453,6 +603,22 @@ export function HelpChat() {
     setBusyBoth(false);
   };
 
+  // ─── trava das aulas ───────────────────────────────────────────────────────
+  /** Aula visível pra este plano: rota fora de /tools (Chaves de IA) é de todo mundo. */
+  const podeCom = (t: Tier | null) => (path: string) => !path.startsWith('/tools/') || tierAllowsTool(t ?? 'free', path);
+
+  /**
+   * Plano pra decidir quais aulas mostrar AGORA: deslogado = free; logado
+   * espera o useTier (até 3 s) e, sem resposta, fica no free (esconde a aula
+   * paga em vez de mostrar pra quem não pode).
+   */
+  const planoAgora = async (): Promise<Tier> => {
+    const ident = await Promise.race([loadIdentity(900), sleep(1600).then(() => null)]);
+    if (!ident?.logged) return 'free';
+    for (let i = 0; i < 30 && tierRef.current == null; i++) await sleep(100);
+    return tierRef.current ?? 'free';
+  };
+
   /**
    * Mostra o passo a passo de uma resposta e, logo depois, PERGUNTA se a
    * pessoa ainda precisa do suporte (ou, num pedido que só a equipe conclui,
@@ -460,8 +626,9 @@ export function HelpChat() {
    */
   const showArticle = async (a: HelpArticle, myRun: number, lead?: string) => {
     setTyping(true);
-    const [ident] = await Promise.all([
+    const [ident, plano] = await Promise.all([
       Promise.race([loadIdentity(900), sleep(1600).then(() => null)]),
+      a.aula ? planoAgora() : Promise.resolve(null),
       lead ? Promise.resolve() : sleep(380),
     ]);
     if (myRun !== run.current) return;
@@ -476,10 +643,11 @@ export function HelpChat() {
       article: a.id,
       path: pathRef.current,
     };
+    const aula = a.aula && plano ? aulaDoChat(a.aula === 'atual' ? pathRef.current : a.aula, podeCom(plano)) : null;
     push({
       kind: 'answer',
       title: a.title,
-      view: articleView(a, { logged: !!ident?.logged, hasGuide: GUIDE_PATHS.has(pathRef.current || '') }),
+      view: articleView(a, { logged: !!ident?.logged, hasGuide: GUIDE_PATHS.has(pathRef.current || ''), aula }),
     });
     await sleep(260);
     const ask = a.request
@@ -487,9 +655,83 @@ export function HelpChat() {
       : 'Isso resolveu? Se ainda precisar, te levo pro nosso suporte no WhatsApp.';
     if (!(await botSay([ask], myRun))) return;
     setStage('answer');
-    setChips(a.request ? { kind: 'request', article: a.id } : { kind: 'resolve', article: a.id });
+    setChips(
+      a.request
+        ? { kind: 'request', article: a.id }
+        : // "Como usar" fora de uma ferramenta com aula: oferece a lista de aulas
+          { kind: 'resolve', article: a.id, maisAulas: a.aula === 'atual' && !aula },
+    );
     setBusyBoth(false);
   };
+
+  /** Cartão da aula + o convite pro suporte, caso a dúvida continue depois do vídeo. */
+  const showAula = async (aula: AulaDoChat, myRun: number, lead?: string) => {
+    setTyping(true);
+    if (lead) {
+      if (!(await botSay([lead], myRun))) return;
+      setTyping(true);
+    }
+    await sleep(lead ? 420 : 700);
+    if (myRun !== run.current) return;
+    setTyping(false);
+    convo.current = {
+      ...freshConvo(convo.current.email),
+      topic: 'duvida',
+      subject: aulaSubject(aula),
+      aula,
+      path: pathRef.current,
+    };
+    push({ kind: 'aula', aula });
+    await sleep(260);
+    if (!(await botSay(['Depois de assistir, se ainda ficar alguma dúvida, te levo pro nosso suporte no WhatsApp.'], myRun))) return;
+    setStage('answer');
+    setChips({ kind: 'resolve', aula, maisAulas: true });
+    setBusyBoth(false);
+  };
+
+  /** Lista das aulas que esta pessoa pode ver (a da ferramenta aberta primeiro). */
+  const showAulas = async (myRun: number, lead?: string) => {
+    setTyping(true);
+    const plano = await planoAgora();
+    if (myRun !== run.current) return;
+    const items = aulasDisponiveis(podeCom(plano), pathRef.current);
+    if (!items.length) {
+      if (await botSay(['Ainda não tem aula em vídeo liberada pro seu plano. Posso te ajudar com outra coisa?'], myRun)) idleTopics('topics');
+      return;
+    }
+    if (!(await botSay([lead ?? 'Essas são as aulas em vídeo. Toque numa pra assistir no YouTube:'], myRun))) return;
+    convo.current = { ...freshConvo(convo.current.email), topic: 'duvida', path: pathRef.current };
+    setStage('topic');
+    setChips({ kind: 'aulas', items });
+    setBusyBoth(false);
+  };
+
+  /**
+   * Aula de uma rota pedida (texto livre ou linha da lista). Se ela não pode
+   * ver (ferramenta de outro plano) ou a aula ainda não saiu, diz isso e mostra
+   * as que ela pode assistir; Chaves de IA sem vídeo cai na resposta escrita.
+   */
+  const askAula = async (path: string, myRun: number) => {
+    setTyping(true);
+    const plano = await planoAgora();
+    if (myRun !== run.current) return;
+    const pode = podeCom(plano);
+    const aula = aulaDoChat(path, pode);
+    if (aula) return showAula(aula, myRun);
+    if (path === '/configuracoes/api') return showArticle(articleById('chave-ia')!, myRun, 'Essa eu te explico por aqui:');
+    const status = aulaStatus(path, pode);
+    const nome = aulaLabel(path);
+    const motivo =
+      status === 'bloqueada'
+        ? `A aula de ${nome} fica liberada junto com a ferramenta, no plano Premium.`
+        : status === 'sem-video'
+          ? `A aula de ${nome} ainda não está no ar.`
+          : null;
+    return showAulas(myRun, motivo ? `${motivo} Essas você já pode assistir:` : undefined);
+  };
+
+  const handlePedida = (pedida: { uma: string } | 'lista', myRun: number) =>
+    pedida === 'lista' ? showAulas(myRun) : askAula(pedida.uma, myRun);
 
   const greet = async (article: HelpArticle | null = null) => {
     const myRun = ++run.current;
@@ -527,6 +769,7 @@ export function HelpChat() {
       email: ident.email || c.email,
       topic: c.topic,
       article: c.article,
+      subject: c.subject,
       description: c.description,
       pathname: c.path ?? pathRef.current,
     });
@@ -604,6 +847,35 @@ export function HelpChat() {
     focusInput();
   };
 
+  /** Viu a aula e ainda precisa do suporte: assunto "Dúvida sobre <ferramenta>". */
+  const toSupportAula = async (aula: AulaDoChat, myRun: number) => {
+    convo.current = {
+      ...freshConvo(convo.current.email),
+      topic: 'duvida',
+      subject: aulaSubject(aula),
+      aula,
+      path: pathRef.current,
+    };
+    if (!(await botSay(['Combinado! Me conta em poucas palavras qual é a dúvida, que eu deixo a mensagem pronta pro suporte.'], myRun))) return;
+    setStage('describe');
+    setChips({ kind: 'quick', items: AULA_STUCK, skip: true });
+    setBusyBoth(false);
+    focusInput();
+  };
+
+  const pickAula = async (aula: AulaDoChat, label = aula.label) => {
+    const myRun = begin(label);
+    if (myRun === null) return;
+    await showAula(aula, myRun);
+  };
+
+  /** Linha "Ver as aulas em vídeo" / chip "Aulas em vídeo". */
+  const pickAulas = async (label: string) => {
+    const myRun = begin(label);
+    if (myRun === null) return;
+    await showAulas(myRun);
+  };
+
   /** Pedido que só a equipe conclui (excluir a conta): vai direto pra mensagem pronta. */
   const sendRequest = async (a: HelpArticle, myRun: number, extra = '') => {
     convo.current = {
@@ -638,6 +910,9 @@ export function HelpChat() {
           if (await botSay(['Por nada! Se precisar, é só chamar.'], myRun)) idleTopics('after');
           return;
         }
+        // "tem aula?", "vídeo de como usa o downloader": a aula vem antes do texto
+        const pedida = aulaPedida(text, pathRef.current);
+        if (pedida) return handlePedida(pedida, myRun);
         const a = findArticle(text);
         if (a) return showArticle(a, myRun, 'Essa eu te explico por aqui:');
         c.topic = detectTopic(text);
@@ -656,9 +931,13 @@ export function HelpChat() {
         return afterDescription(myRun);
       }
       case 'describe': {
-        // depois de escolher um assunto, a pergunta pode ter resposta pronta;
-        // depois do "Falar com o suporte" (c.article), o texto é o relato
-        const a = c.article ? null : findArticle(text);
+        // depois de escolher um assunto, a pergunta pode ter resposta pronta (ou
+        // aula); depois do "Falar com o suporte" (resposta ou aula já vista),
+        // o texto é o relato
+        const livre = !c.article && !c.subject;
+        const pedida = livre ? aulaPedida(text, pathRef.current) : null;
+        if (pedida) return handlePedida(pedida, myRun);
+        const a = livre ? findArticle(text) : null;
         if (a) return showArticle(a, myRun, 'Essa eu te explico por aqui:');
         c.description = text;
         return afterDescription(myRun);
@@ -666,6 +945,15 @@ export function HelpChat() {
       case 'answer': {
         const a = articleById(c.article);
         if (!a) {
+          if (c.aula) {
+            // depois da aula: "valeu"/"não" = tudo certo; outra pergunta = outra resposta;
+            // o resto é a dúvida, que já vira o relato pro suporte
+            if (isThanks(text) || isYes(text) || isGiveUp(text) || isNo(text)) return resolved(myRun);
+            const pedida = aulaPedida(text, pathRef.current);
+            if (pedida && (pedida === 'lista' || pedida.uma !== c.aula.path)) return handlePedida(pedida, myRun);
+            const other = findArticle(text);
+            if (other) return showArticle(other, myRun, 'Essa eu te explico por aqui:');
+          }
           c.description = text;
           return afterDescription(myRun);
         }
@@ -678,6 +966,8 @@ export function HelpChat() {
         }
         if (isThanks(text) || isYes(text) || isGiveUp(text)) return resolved(myRun);
         if (isNo(text)) return toSupport(a, myRun);
+        const pedida = aulaPedida(text, pathRef.current);
+        if (pedida) return handlePedida(pedida, myRun);
         const other = findArticle(text);
         if (other && other.id !== a.id) return showArticle(other, myRun, 'Essa eu te explico por aqui:');
         // escreveu o que está acontecendo: já é o relato pro suporte
@@ -820,6 +1110,9 @@ export function HelpChat() {
   const started = msgs.some((m) => m.kind === 'user');
   const itemsTopic = chips?.kind === 'items' ? topicById(chips.topic) : null;
   const chipArticle = chips?.kind === 'resolve' || chips?.kind === 'request' ? articleById(chips.article) : null;
+  const chipAula = chips?.kind === 'resolve' ? chips.aula ?? null : null;
+  // aula da ferramenta aberta, se esta pessoa pode ver (plano ainda carregando = free)
+  const aulaAtual = aulaDoChat(pathname, podeCom(tier));
 
   return (
     <>
@@ -835,6 +1128,7 @@ export function HelpChat() {
           aria-hidden={!shown}
           data-testid="help-chat-panel"
         >
+          <TierProbe onTier={onTier} />
           <div className={s.inner}>
             <header className={s.header}>
               <span className={s.avatar}>
@@ -877,6 +1171,13 @@ export function HelpChat() {
                   return (
                     <div key={m.id} className={rowCls}>
                       <AnswerCard title={m.title} view={m.view} onLink={onAnswerLink} />
+                    </div>
+                  );
+                }
+                if (m.kind === 'aula') {
+                  return (
+                    <div key={m.id} className={rowCls}>
+                      <AulaCard aula={m.aula} atual={pathname} onLink={onAnswerLink} />
                     </div>
                   );
                 }
@@ -937,6 +1238,16 @@ export function HelpChat() {
                           </button>
                         );
                       })}
+                      <button
+                        type="button"
+                        className={`${s.chip} ${s.chipAula}`}
+                        style={{ animationDelay: `${240 + HOME_ARTICLES.length * 50}ms` }}
+                        onClick={() => void pickAulas('Aulas em vídeo')}
+                        data-testid="help-chat-aulas-chip"
+                      >
+                        <PlayDot />
+                        Aulas em vídeo
+                      </button>
                     </div>
                   </div>
                 </>
@@ -944,6 +1255,34 @@ export function HelpChat() {
 
               {itemsTopic ? (
                 <div className={s.faq} data-testid="help-chat-faq">
+                  {/* dúvida ou erro numa ferramenta: a aula dela primeiro */}
+                  {(itemsTopic.id === 'duvida' || itemsTopic.id === 'ferramenta') && aulaAtual ? (
+                    <button
+                      type="button"
+                      className={s.faqRow}
+                      onClick={() => void pickAula(aulaAtual, `Ver a aula de ${aulaAtual.label}`)}
+                      data-testid="help-chat-aula-atual"
+                    >
+                      <span className={`${s.faqIcon} ${s.faqIconAula}`}>
+                        <RowIcon kind="aula" />
+                      </span>
+                      <span className={s.faqLabel}>Ver a aula de {aulaAtual.label}</span>
+                      <span className={s.chev}>
+                        <LineIcon size={15} d="m9.5 6.5 5.5 5.5-5.5 5.5" />
+                      </span>
+                    </button>
+                  ) : null}
+                  {itemsTopic.id === 'duvida' ? (
+                    <button type="button" className={s.faqRow} onClick={() => void pickAulas(VER_AULAS)}>
+                      <span className={`${s.faqIcon} ${s.faqIconAula}`}>
+                        <RowIcon kind="aula" />
+                      </span>
+                      <span className={s.faqLabel}>{VER_AULAS}</span>
+                      <span className={s.chev}>
+                        <LineIcon size={15} d="m9.5 6.5 5.5 5.5-5.5 5.5" />
+                      </span>
+                    </button>
+                  ) : null}
                   {itemsTopic.artigos.map((id, i) => {
                     const a = articleById(id)!;
                     return (
@@ -1005,7 +1344,39 @@ export function HelpChat() {
                 </div>
               ) : null}
 
-              {chips?.kind === 'resolve' && chipArticle ? (
+              {chips?.kind === 'aulas' ? (
+                <div className={s.faq} data-testid="help-chat-aulas">
+                  {chips.items.map((a, i) => (
+                    <button
+                      key={a.path}
+                      type="button"
+                      className={s.faqRow}
+                      style={{ animationDelay: `${i * 35}ms` }}
+                      onClick={() => void pickAula(a)}
+                    >
+                      <span className={s.aulaRowThumb}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={a.capa} alt="" loading="lazy" decoding="async" />
+                        <span className={s.aulaThumbPlay} aria-hidden="true">
+                          <svg width="8" height="8" viewBox="0 0 24 24">
+                            <path d="M8 5.5v13l10.5-6.5L8 5.5Z" fill="#fff" />
+                          </svg>
+                        </span>
+                      </span>
+                      <span className={s.faqLabel}>
+                        {a.label}
+                        {a.path === pathname ? <span className={s.aulaHere}>Esta tela</span> : null}
+                      </span>
+                      <span className={s.aulaRowTime}>{a.duracao}</span>
+                      <span className={s.chev}>
+                        <LineIcon size={15} d="m9.5 6.5 5.5 5.5-5.5 5.5" />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {chips?.kind === 'resolve' && (chipArticle || chipAula) ? (
                 <div className={s.quick} data-testid="help-chat-resolve">
                   <button type="button" className={s.chip} onClick={() => onChip(RESOLVED, resolved)}>
                     {RESOLVED}
@@ -1014,12 +1385,25 @@ export function HelpChat() {
                     type="button"
                     className={`${s.chip} ${s.chipWa}`}
                     style={{ animationDelay: '50ms' }}
-                    onClick={() => onChip(TO_SUPPORT, (r) => toSupport(chipArticle, r))}
+                    onClick={() =>
+                      onChip(TO_SUPPORT, (r) => (chipAula ? toSupportAula(chipAula, r) : toSupport(chipArticle!, r)))
+                    }
                     data-testid="help-chat-to-support"
                   >
                     <WhatsGlyph size={14} />
                     {TO_SUPPORT}
                   </button>
+                  {chips.maisAulas ? (
+                    <button
+                      type="button"
+                      className={`${s.chip} ${s.chipAula}`}
+                      style={{ animationDelay: '100ms' }}
+                      onClick={() => void pickAulas(chipAula ? 'Ver outras aulas' : VER_AULAS)}
+                    >
+                      <PlayDot />
+                      {chipAula ? 'Ver outras aulas' : VER_AULAS}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 
