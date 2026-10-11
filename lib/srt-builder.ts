@@ -194,7 +194,7 @@ function anchorTokens(
 
 /* ───────────────────────── interpolation ───────────────────────── */
 
-type TimedToken = CopyToken & { start: number; end: number };
+type TimedToken = CopyToken & { start: number; end: number; idx: number };
 
 function interpolateTimes(
   tokens: CopyToken[],
@@ -233,7 +233,7 @@ function interpolateTimes(
       const offset = (i - fromI) * slot;
       const start = Math.round(aEnd + offset);
       const end = Math.round(aEnd + offset + slot * 0.85); // pequeno gap
-      timed.push({ ...tokens[i], start, end });
+      timed.push({ ...tokens[i], start, end, idx: i });
     }
   }
 
@@ -243,10 +243,20 @@ function interpolateTimes(
       ...tokens[copyIdx],
       start: words[trIdx].start,
       end: words[trIdx].end,
+      idx: copyIdx,
     });
   });
 
-  return timed.sort((a, b) => a.start - b.start);
+  // ORDEM DA COPY, sempre (11.10). Ordenar pelo tempo embaralhava o texto
+  // quando a transcrição tinha poucas palavras (áudio quase sem fala): o SRT
+  // saía "Esse legenda." / "é um texto ... para" / "gerar a". Na fala normal
+  // as duas ordens são a mesma; aqui só se garante que o tempo nunca volta.
+  timed.sort((a, b) => a.idx - b.idx);
+  for (let i = 1; i < timed.length; i++) {
+    if (timed[i].start < timed[i - 1].start) timed[i].start = timed[i - 1].start;
+    if (timed[i].end < timed[i].start) timed[i].end = timed[i].start;
+  }
+  return timed;
 }
 
 /* ───────────────────────── grouping into subs ───────────────────────── */
@@ -359,6 +369,17 @@ function polishTimings(subs: Subtitle[]): Subtitle[] {
     // Se ficou inválido (overlap), fixa em min
     if (end <= s.start) end = s.start + MIN_DURATION_MS;
     s.end = end;
+  }
+  // Nenhuma legenda começa antes da anterior acabar (11.10): o "fixa em min"
+  // acima podia passar por cima da próxima quando duas começavam juntas.
+  for (let i = 1; i < subs.length; i++) {
+    const prev = subs[i - 1];
+    const s = subs[i];
+    if (s.start < prev.end + MIN_GAP_MS) {
+      const dur = Math.max(MIN_DURATION_MS, s.end - s.start);
+      s.start = prev.end + MIN_GAP_MS;
+      s.end = Math.max(s.end, s.start + Math.min(dur, MIN_DURATION_MS));
+    }
   }
   return subs;
 }

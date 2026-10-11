@@ -366,7 +366,7 @@ export function CaptionScriptModal({
       `Roteiro aplicado em ${r.styled} bloco${r.styled === 1 ? '' : 's'}` +
         (r.splits > 0 ? `, ${r.splits} partido${r.splits === 1 ? '' : 's'} na palavra exata` : '') +
         (inexatos.length > 0
-          ? `. ${inexatos.length} fronteira${inexatos.length === 1 ? '' : 's'} nao fechou na palavra certa (liga "cortar na palavra exata").`
+          ? `. ${inexatos.length} ${inexatos.length === 1 ? 'divisão não caiu' : 'divisões não caíram'} na palavra certa (ligue "cortar na palavra exata").`
           : '. Ctrl+Z desfaz.'),
     );
   };

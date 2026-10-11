@@ -96,6 +96,8 @@ const ETAPAS = [
   { tsx: ["lib/ffmpeg-worker.test.ts"] },
   // auditoria Premium (10.10): fila com dono (uma ferramenta não troca arquivo nem cancela a outra), Compressor sem inflar/608x1080, SRT >8 min, trabalho não se perde ao trocar de tela
   { tsx: ["lib/auditoria-1010.test.ts"] },
+  { tsx: ["lib/auditoria-1110.test.ts"] },
+  { tsx: ["lib/srt-builder.test.ts"] },
   // fontes de task do Pilot (05.09): DOCS / CREATOR — doc real vira N tasks, ids seguros, .docx, persistencia
   { tsc: "lib/pilot-fontes.ts lib/pilot-fontes.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom,dom.iterable", run: [".test-tmp/pilot-fontes.test.js"] },
   { tsc: "lib/typography/player-control.ts lib/typography/player-control.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/player-control.test.js"] },

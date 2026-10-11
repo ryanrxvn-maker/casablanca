@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { logHistory } from '@/lib/history';
-import { toFriendlyMessage } from '@/lib/friendly-error';
+import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import {
   ToolHero,
@@ -31,6 +31,7 @@ import {
   concatDecupChunks,
   cutVideoSegments,
   extractAudioAs,
+  motivoSemAudio,
   prepareVoiceForDecupagem,
   splitMediaForChunks,
 } from '@/lib/ffmpeg-worker';
@@ -114,9 +115,16 @@ const TOO_BIG_MSG =
   `Reduz o peso na ferramenta Compressor primeiro e tenta de novo.`;
 
 const BAD_TYPE_MSG = 'Formato não suportado. Manda MP3, WAV, MP4, WEBM ou MOV.';
+const EMPTY_MSG = 'Esse arquivo está vazio (0 KB). Exporte de novo e adicione outra vez.';
+// Sem fala no arquivo inteiro (11.10): o aviso antigo ("Diminui a tolerância")
+// nem chegava no cliente — virava "Tenta de novo" — e um arquivo só de
+// silêncio saía PRONTO com 0,08 s. Abaixo de MIN_FALA_SEG de fala, não entrega.
+const SEM_FALA_MSG = 'Não encontrei fala nesse arquivo — ele parece ser só silêncio ou só música. Nada foi cortado.';
+const MIN_FALA_SEG = 0.3;
 
 // Traduz falhas técnicas do ffmpeg/navegador num recado que o cliente entende.
 function friendlyError(e: unknown): string {
+  if (e instanceof FriendlyError) return e.message;
   const raw = (e as Error)?.message || '';
   // Watchdog do ffmpeg-wasm matou um exec pendurado (hang) — não é arquivo
   // pesado: a instância já reiniciou limpa, re-tentar costuma resolver.
@@ -529,11 +537,12 @@ export default function DecupagemPage() {
       const accepted = files.slice(0, room).map((f) => {
         const tooBig = f.size > MAX_FILE_BYTES;
         const badType = !isAcceptedMedia(f);
+        const empty = f.size === 0;
         return {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           file: f,
-          status: (tooBig || badType ? 'error' : 'pending') as QueueStatus,
-          error: badType ? BAD_TYPE_MSG : tooBig ? TOO_BIG_MSG : undefined,
+          status: (tooBig || badType || empty ? 'error' : 'pending') as QueueStatus,
+          error: badType ? BAD_TYPE_MSG : empty ? EMPTY_MSG : tooBig ? TOO_BIG_MSG : undefined,
         };
       });
       return [...prev, ...accepted];
@@ -582,9 +591,11 @@ export default function DecupagemPage() {
       onStage('Cortando silêncios...');
       const { buffer: trimmed, plan: audioPlan } = trimSpeechCutWithPlan(decoded, keepSilence);
       const audit = toAudit(audioPlan);
-      if (trimmed.duration <= 0.05) {
+      // Parte de arquivo grande: só some a parte vazia (regra antiga). Arquivo
+      // inteiro: menos de MIN_FALA_SEG de fala = não há o que entregar.
+      if (trimmed.duration <= (allowEmpty ? 0.05 : MIN_FALA_SEG)) {
         if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
-        throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
+        throw new FriendlyError(SEM_FALA_MSG);
       }
       let blob: Blob;
       if (audioFormat === 'wav') {
@@ -618,11 +629,11 @@ export default function DecupagemPage() {
     const videoPlan = planSpeechCut(decoded, keepSilence);
     const segments = videoPlan.segments;
     const audit = toAudit(videoPlan);
-    if (segments.length === 0) {
-      if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
-      throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
-    }
     const newDur = segments.reduce((a, s) => a + (s.end - s.start), 0);
+    if (segments.length === 0 || (!allowEmpty && newDur <= MIN_FALA_SEG)) {
+      if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
+      throw new FriendlyError(SEM_FALA_MSG);
+    }
     onStage(`Cortando ${segments.length} trechos de fala...`);
     const blob = await cutVideoSegments(leveled, segments, {
       onStage: (s) => onStage(s),
@@ -670,8 +681,8 @@ export default function DecupagemPage() {
       audit = mergeAudit(audit, part.audit);
       if (part.blob) outputs.push(part.blob);
     }
-    if (outputs.length === 0) {
-      throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
+    if (outputs.length === 0 || newDur <= MIN_FALA_SEG) {
+      throw new FriendlyError(SEM_FALA_MSG);
     }
     const joinFormat = kind === 'video' ? ('mp4' as const) : audioFormat;
     const joined =
@@ -694,6 +705,9 @@ export default function DecupagemPage() {
     onProgress: (r: number | null) => void,
   ): Promise<Result> {
     const file = item.file;
+    // Vídeo sem som / arquivo que não abre: a causa certa antes de processar (11.10).
+    const motivo = await motivoSemAudio(file);
+    if (motivo) throw new FriendlyError(motivo);
     const fileIsVideo = isVideoFile(file);
     // Segue EXATAMENTE o que o card mostra: MP4 só quando está liberado e escolhido.
     const effectiveKind: OutputKind = fileIsVideo && outFormat === 'mp4' ? 'video' : 'audio';
@@ -706,7 +720,7 @@ export default function DecupagemPage() {
     const part = await processBrowserBlob(file, effectiveKind, onStage, onProgress, false);
     if (!part.blob) {
       // allowEmpty=false já lança antes — defesa extra pro TS e pra runtime.
-      throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
+      throw new FriendlyError(SEM_FALA_MSG);
     }
     if (effectiveKind === 'video') {
       return {
@@ -753,6 +767,10 @@ export default function DecupagemPage() {
         if (!isAcceptedMedia(item.file)) {
           // Formato inválido é permanente — nunca re-tenta.
           patchItem(item.id, { status: 'error', error: BAD_TYPE_MSG, stage: undefined, progress: null });
+          continue;
+        }
+        if (item.file.size === 0) {
+          patchItem(item.id, { status: 'error', error: EMPTY_MSG, stage: undefined, progress: null });
           continue;
         }
         if (item.file.size > MAX_FILE_BYTES) {

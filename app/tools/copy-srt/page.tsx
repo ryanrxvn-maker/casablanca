@@ -14,7 +14,11 @@ import { downloadBlob } from '@/lib/audio-engine';
 import {
   cancelarMotorSeDono,
   extractAudioForTranscription,
+  motivoSemAudio,
+  MSG_AUDIO_EM_SILENCIO,
   probeVideoMetadata,
+  SILENCIO_MAX_DB,
+  volumeMaximoDb,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
 import { runFfmpegExclusive, MSG_NA_FILA } from '@/lib/ffmpeg-serial';
@@ -137,9 +141,13 @@ export default function CopySrtPage() {
       // Na FILA GLOBAL do motor (10.10) e COM a duração: sem ela todo áudio
       // acima de ~8 min estourava o envio, apesar de a tela prometer 60 min.
       const audio = await runFfmpegExclusive(
-        () => {
+        async () => {
           if (envio.cancelado) throw new Error('CANCELLED_BY_USER');
-          return extractAudioForTranscription(
+          // Vídeo sem som / arquivo que não abre: a causa certa na hora (11.10),
+          // em vez de "Tenta de novo em instantes".
+          const motivo = await motivoSemAudio(file);
+          if (motivo) throw new FriendlyError(motivo);
+          const extraido = await extractAudioForTranscription(
             file,
             {
               onStage: (s) => setStage(s),
@@ -147,6 +155,11 @@ export default function CopySrtPage() {
             },
             duration ?? undefined,
           );
+          // Áudio todo em silêncio (11.10): a transcrição "inventava" palavras e
+          // saía um SRT PRONTO com legendas depois do fim do áudio.
+          const pico = await volumeMaximoDb(extraido);
+          if (pico !== null && pico <= SILENCIO_MAX_DB) throw new FriendlyError(MSG_AUDIO_EM_SILENCIO);
+          return extraido;
         },
         DONO,
         () => setStage(MSG_NA_FILA),

@@ -23,7 +23,11 @@ import { formatBytes, formatTime } from '@/lib/utils';
 import {
   cancelarMotorSeDono,
   extractAudioForTranscription,
+  motivoSemAudio,
+  MSG_AUDIO_EM_SILENCIO,
   probeVideoMetadata,
+  SILENCIO_MAX_DB,
+  volumeMaximoDb,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
 import { runFfmpegExclusive, MSG_NA_FILA } from '@/lib/ffmpeg-serial';
@@ -1091,9 +1095,13 @@ function TipografiaInner() {
       // Na FILA GLOBAL do motor (10.10): outra ferramenta rodando junto não
       // troca nem apaga o arquivo desta etapa.
       const audio = await runFfmpegExclusive(
-        () => {
+        async () => {
           if (legenda.cancelado) throw new Error('CANCELLED_BY_USER');
-          return extractAudioForTranscription(
+          // Vídeo sem som / arquivo que não abre: a causa certa na hora (11.10),
+          // em vez de "Não consegui transcrever agora. Tenta de novo".
+          const motivo = await motivoSemAudio(file);
+          if (motivo) throw new FriendlyError(motivo);
+          const extraido = await extractAudioForTranscription(
             file,
             {
               onStage: (s) => setStage(s),
@@ -1101,6 +1109,10 @@ function TipografiaInner() {
             },
             duration ?? undefined,
           );
+          // Vídeo todo em silêncio: sem isso a transcrição pode "inventar" fala.
+          const pico = await volumeMaximoDb(extraido);
+          if (pico !== null && pico <= SILENCIO_MAX_DB) throw new FriendlyError(MSG_AUDIO_EM_SILENCIO);
+          return extraido;
         },
         DONO,
         () => setStage(MSG_NA_FILA),

@@ -7,6 +7,7 @@ import { formatBRL } from '@/lib/utils';
 import { ToolStep, ToolSlider, ToolMetric, ToolResultCard } from '@/components/tool-kit';
 import { IconCalculadora, IconStepMoney, IconStepClock, IconStepTag } from '@/components/ToolIcons';
 import { downloadBudgetReport } from './report';
+import { maskTime, parseMoney } from '@/lib/calculadora-campos';
 
 const HUE = 'rgba(148,163,184,0.4)';
 
@@ -34,11 +35,6 @@ function adLabel(ad: AdRow, i: number, sep = ''): string {
   return (ad.label || '').trim() || `AD${sep}${i + 1}`;
 }
 
-/** Preço digitado ("80", "99,90") → número. Vazio/inválido = 0. */
-function parseMoney(s: string): number {
-  return parseFloat((s || '').trim().replace(',', '.')) || 0;
-}
-
 /**
  * Converte a duração de um AD em SEGUNDOS, SEMPRE interpretando como
  * minutos e segundos — não importa o separador. `06:19`, `06,19` e
@@ -64,28 +60,6 @@ function fmtDur(totalSec: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
 }
 
-/**
- * Máscara de TEMPO estilo ODÔMETRO: o usuário SÓ digita números e eles entram
- * pela DIREITA, subindo de segundos → minutos → horas, sempre normalizado pra
- * fazer sentido (60s vira 1min, 60min vira 1h). Nunca precisa digitar `:`.
- *
- *   1 → 00:01   ·   11 → 00:11   ·   111 → 01:11   ·   1111 → 11:11
- *   5 → 00:05   ·   55 → 00:55   ·   555 → 05:55   ·   5555 → 55:55
- *   14000 → 1:40:00   (140 min já aparecem como 2h20 — sempre "faz sentido")
- *
- * Como `fmtDur` agrupa em HH:MM:SS e este parser lê os dígitos no MESMO
- * agrupamento (2 seg / 2 min / resto horas), a máscara faz round-trip perfeito:
- * reprocessar o próprio texto formatado devolve o mesmo tempo.
- */
-function maskTime(raw: string): string {
-  // Só os dígitos, sem zeros à esquerda inúteis; teto de 6 (até 99:99:99).
-  const digits = (raw || '').replace(/\D/g, '').replace(/^0+/, '').slice(0, 6);
-  if (!digits) return '';
-  const sec = parseInt(digits.slice(-2), 10) || 0;
-  const min = digits.length > 2 ? parseInt(digits.slice(-4, -2), 10) || 0 : 0;
-  const hr = digits.length > 4 ? parseInt(digits.slice(0, -4), 10) || 0 : 0;
-  return fmtDur(hr * 3600 + min * 60 + sec);
-}
 
 export default function CalculadoraPage() {
   const [valorPorMinuto, setValorPorMinuto] = useToolState<string>(

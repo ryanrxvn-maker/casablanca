@@ -21,6 +21,8 @@ import {
 import { buildZip } from '@/lib/zip-builder';
 import { zipCabeNoNavegador, MSG_ZIP_GRANDE, MSG_ZIP_FALHOU } from '@/lib/zip-limite';
 import { formatTime } from '@/lib/utils';
+import { motivoSemAudio } from '@/lib/ffmpeg-worker';
+import { runFfmpegExclusive } from '@/lib/ffmpeg-serial';
 
 type OutputPart = {
   index: number;
@@ -96,11 +98,15 @@ export default function AudioSplitPage() {
       setStatus(null);
     } catch (e) {
       console.error(e);
+      // Vídeo sem som / arquivo que não abre: a causa certa (11.10). Só lê o
+      // cabeçalho, e só quando já deu erro — o caso normal segue sem o motor.
+      const motivo = await runFfmpegExclusive(() => motivoSemAudio(file), 'audio-split').catch(() => null);
       setError(
-        toFriendlyMessage(
-          e,
-          'Não consegui dividir esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido ou pesado demais.',
-        ),
+        motivo ??
+          toFriendlyMessage(
+            e,
+            'Não consegui dividir esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido ou pesado demais.',
+          ),
       );
       setStatus(null);
     } finally {

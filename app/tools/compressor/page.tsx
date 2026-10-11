@@ -275,8 +275,8 @@ export default function CompressorPage() {
     setStageMsg('Cancelado.');
   }
 
-  /* Roda 1 job: pega instância do pool, processa, libera. */
-  async function runJob(job: Job, batchIdx: number, batchTotal: number) {
+  /* Roda 1 job: pega instância do pool, processa, libera. true = ficou pronto. */
+  async function runJob(job: Job, batchIdx: number, batchTotal: number): Promise<boolean> {
     // Arquivo SÓ de áudio (tem duração mas altura 0): o encode de vídeo
     // falharia com erro técnico em inglês. Recusa com aviso claro.
     const meta = metaCache.get(metaKey(job.file));
@@ -285,7 +285,7 @@ export default function CompressorPage() {
         state: 'error',
         error: 'Esse arquivo não tem vídeo (parece ser só áudio). O Compressor trabalha com vídeos MP4, WEBM ou MOV.',
       });
-      return;
+      return false;
     }
     // Arquivo GRANDE: o encode de uma vez estoura o heap do wasm (~500MB).
     // Acima do limiar vai em PARTES (WORKERFS, sem carregar o original na
@@ -302,9 +302,9 @@ export default function CompressorPage() {
     if (chunked && rawPredicted > COMPRESS_MAX_OUTPUT_BYTES) {
       updateJob(job.id, {
         state: 'error',
-        error: `A saída prevista (~${Math.round(rawPredicted / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução e tente de novo.`,
+        error: `A saída prevista (~${Math.round(rawPredicted / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Aumente a compressão ou escolha uma resolução menor e tente de novo.`,
       });
-      return;
+      return false;
     }
     const pool = getFFmpegPool(effectivePoolSize());
     const t0 = performance.now();
@@ -322,7 +322,7 @@ export default function CompressorPage() {
           ? 'Cancelado por você.'
           : toFriendlyMessage(e, 'Não consegui iniciar o motor de compressão. Confira sua internet e tente de novo.'),
       });
-      return;
+      return false;
     }
     try {
       if (lote.cancelado) throw new Error('CANCELLED_BY_USER');
@@ -380,6 +380,7 @@ export default function CompressorPage() {
           setCalibration((prev) => prev * 0.3 + ratio * 0.7);
         }
       }
+      return true;
     } catch (e) {
       // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
       // Travamento/falta de memória também chegam como "terminate/abort".
@@ -388,11 +389,19 @@ export default function CompressorPage() {
       } else {
         // eslint-disable-next-line no-console
         console.error('[compressor]', job.file.name, e);
+        // O navegador nem conseguiu ler o arquivo como vídeo (sem duração nem
+        // tamanho) e o motor também falhou: é arquivo corrompido/que não é
+        // vídeo (11.10). Antes uma imagem renomeada pra .mp4 virava "o
+        // navegador ficou sem memória" e um arquivo estragado, "suba o CRF".
+        const naoAbriu = !!meta && meta.durationSec === 0 && meta.height === 0;
         updateJob(job.id, {
           state: 'error',
-          error: toFriendlyMessage(e, 'Não consegui comprimir esse vídeo. Tente de novo — se for muito pesado, suba o CRF ou reduza a resolução.'),
+          error: naoAbriu
+            ? 'Não consegui abrir esse vídeo — ele pode estar corrompido ou num formato que o navegador não lê. Exporte de novo em MP4 e tente outra vez.'
+            : toFriendlyMessage(e, 'Não consegui comprimir esse vídeo. Tente de novo — se ele for muito pesado, aumente a compressão ou escolha uma resolução menor.'),
         });
       }
+      return false;
     } finally {
       pool.release(ff);
     }
@@ -422,6 +431,7 @@ export default function CompressorPage() {
     const total = initial.length;
     let dispatched = 0;
     let completed = 0;
+    let falhas = 0;
     // A aba não congela em segundo plano enquanto comprime (10.10).
     acquireKeepAlive();
 
@@ -434,9 +444,10 @@ export default function CompressorPage() {
         const idx = dispatched++;
         if (idx >= initial.length) break;
         const job = initial[idx];
-        await runJob(job, idx + 1, total);
+        if (!(await runJob(job, idx + 1, total))) falhas++;
         completed++;
-        setStageMsg(`${completed}/${total} concluídos…`);
+        // "processados", não "concluídos": um vídeo com erro também conta aqui.
+        setStageMsg(`${completed}/${total} processados…`);
       }
     };
 
@@ -448,7 +459,16 @@ export default function CompressorPage() {
 
     try {
       await Promise.all(workers);
-      if (!lote.cancelado) setStageMsg(total ? `Concluído · ${total}/${total}` : 'Todos os vídeos já estavam prontos.');
+      // Resumo honesto (11.10): com 3 erros em 4 vídeos aparecia "Concluído · 4/4".
+      if (!lote.cancelado) {
+        setStageMsg(
+          !total
+            ? 'Todos os vídeos já estavam prontos.'
+            : falhas
+              ? `Concluído · ${total - falhas} pronto${total - falhas === 1 ? '' : 's'} · ${falhas} com erro`
+              : `Concluído · ${total}/${total}`,
+        );
+      }
     } finally {
       releaseKeepAlive();
       setProcessing(false);

@@ -487,7 +487,7 @@ export default function CamuflagemPage() {
           });
           if (fmt === 'mp4' && !isVideoFile(it.file)) {
             throw new Error(
-              'Para sair em MP4, o arquivo camuflado precisa ser um video.',
+              'Para sair em MP4, o arquivo camuflado precisa ser um vídeo.',
             );
           }
 

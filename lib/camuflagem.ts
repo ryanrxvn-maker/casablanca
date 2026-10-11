@@ -452,8 +452,8 @@ export async function verifyCamouflage(args: {
     data: Float32Array;
   }> = [
     { kind: 'sum', label: 'Soma L+R', data: sum },
-    { kind: 'avg', label: 'Media (L+R)/2', data: avg },
-    { kind: 'left', label: 'Canal unico (AssemblyAI/Whisper)', data: singleChannel(resBuf, 0) },
+    { kind: 'avg', label: 'Média (L+R)/2', data: avg },
+    { kind: 'left', label: 'Canal único (AssemblyAI/Whisper)', data: singleChannel(resBuf, 0) },
     { kind: 'right', label: 'Canal direito', data: singleChannel(resBuf, 1) },
   ];
 
@@ -565,8 +565,8 @@ export async function verifyMute(args: {
 
   const sources: Array<{ kind: DownmixKind; label: string; data: Float32Array }> = [
     { kind: 'sum', label: 'Soma L+R', data: sum },
-    { kind: 'avg', label: 'Media (L+R)/2', data: avg },
-    { kind: 'left', label: 'Canal unico (AssemblyAI/Whisper)', data: L },
+    { kind: 'avg', label: 'Média (L+R)/2', data: avg },
+    { kind: 'left', label: 'Canal único (AssemblyAI/Whisper)', data: L },
     { kind: 'right', label: 'Canal direito', data: R },
   ];
 

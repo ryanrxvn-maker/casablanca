@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { logHistory } from '@/lib/history';
-import { toFriendlyMessage } from '@/lib/friendly-error';
+import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -12,6 +12,7 @@ import {
   cancelFFmpeg,
   cancelarMotorSeDono,
   extractReportPcm,
+  motivoSemAudio,
   normalizeVolume,
   type NormalizeEngineInfo,
   type NormalizeOutFormat,
@@ -28,6 +29,8 @@ import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
 import { IconNormalizador, IconStepFiles, IconStepFormat } from '@/components/ToolIcons';
 
 const HUE = 'rgba(94,234,212,0.4)';
+/** Pico abaixo disso = arquivo todo em silêncio (o relatório usa -70 como piso). */
+const SILENCIO_PICO_DB = -60;
 
 /**
  * Normalizador de Áudio — motor de duas passadas EBU R128 (denoise IA +
@@ -185,6 +188,10 @@ export default function NormalizadorPage() {
               onStage: (s: string) =>
                 setStageMsg(`Item ${i + 1}/${initial.length}: ${job.file.name} — ${s}`),
             };
+            // Vídeo sem som ou arquivo que não abre: a causa certa na hora
+            // (11.10) — antes rodava o motor 2 vezes e dizia "Tenta de novo".
+            const motivo = await motivoSemAudio(job.file);
+            if (motivo) throw new FriendlyError(motivo);
             let blob: Blob;
             try {
               blob = await normalizeVolume(
@@ -236,6 +243,12 @@ export default function NormalizadorPage() {
               else console.warn('[normalizador] relatório falhou:', reportErr);
             }
 
+            // Arquivo inteiro em silêncio (11.10): saía "OK" com o relatório
+            // dizendo "-70 dB · já no nível". Não há voz pra nivelar.
+            if (report && report.before.peakDb <= SILENCIO_PICO_DB) {
+              URL.revokeObjectURL(url);
+              throw new FriendlyError('Esse arquivo está em silêncio — não encontrei voz pra nivelar. Confira se escolheu o arquivo certo.');
+            }
             updateJob(job.id, {
               state: 'done',
               progress: 100,

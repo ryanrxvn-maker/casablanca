@@ -241,7 +241,9 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
       // Next esse base pode virar file:///, então entregue HTTPS absoluto.
       const classWorkerURL = new URL(FFMPEG_CLASS_WORKER_URL, window.location.origin).href;
       await ff.load({ coreURL, wasmURL, classWorkerURL });
-      onStage?.('Pronto.');
+      // "Processando...", não "Pronto." (11.10): esta etapa fica na tela
+      // enquanto o trabalho roda — no Mixer aparecia "— PRONTO." com 12%.
+      onStage?.('Processando...');
       return ff;
     } catch (err) {
       lastErr = err;
@@ -731,7 +733,7 @@ export async function compressVideoChunked(
     }) * 1.3);
     if (predicted > COMPRESS_MAX_OUTPUT_BYTES) {
       throw new Error(
-        `A saída prevista (~${Math.round(predicted / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução.`,
+        `A saída prevista (~${Math.round(predicted / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Aumente a compressão ou escolha uma resolução menor.`,
       );
     }
 
@@ -1327,6 +1329,120 @@ async function readDurationFromLogs(ff: FFmpeg, path: string): Promise<number> {
   }
   return dur;
 }
+
+/* ─── Arquivo que não serve pra ferramenta de ÁUDIO (11.10) ─────────────────
+   Vídeo SEM trilha de som (b-roll, gravação de tela), arquivo corrompido ou
+   que nem é mídia: antes cada ferramenta rodava o motor (às vezes 2 vezes) e
+   terminava em "Tenta de novo" — e tentar de novo nunca resolve. Aqui a causa
+   certa sai na hora, lendo só o cabeçalho do arquivo (WORKERFS, sem copiar pra
+   memória do motor). Fica FORA das funções de processamento de propósito: o
+   Pilot usa as mesmas funções e segue igual. */
+export const MSG_SEM_AUDIO =
+  'Esse arquivo não tem som — não há áudio pra processar. Use um vídeo ou áudio com a fala gravada.';
+export const MSG_ARQUIVO_ILEGIVEL =
+  'Não consegui abrir esse arquivo — ele pode estar corrompido ou não ser um vídeo/áudio de verdade. Exporte de novo e tente outra vez.';
+export const MSG_AUDIO_EM_SILENCIO =
+  'Esse áudio está em silêncio — não encontrei fala nele. Confira se escolheu o arquivo certo.';
+
+export type DiagnosticoArquivo = { temAudio: boolean; temVideo: boolean; legivel: boolean };
+
+/** O que o arquivo tem por dentro, pelo log do ffmpeg (sem processar nada). */
+export function lerTrilhasDoLog(linhas: string[]): DiagnosticoArquivo {
+  let temAudio = false;
+  let temVideo = false;
+  let invalido = false;
+  for (const l of linhas) {
+    if (/Stream #\d+:\d+.*\bAudio:/.test(l)) temAudio = true;
+    if (/Stream #\d+:\d+.*\bVideo:/.test(l)) temVideo = true;
+    if (/Invalid data found when processing input|moov atom not found|Error opening input/i.test(l)) invalido = true;
+  }
+  return { temAudio, temVideo, legivel: !invalido && (temAudio || temVideo) };
+}
+
+/**
+ * Lê só o cabeçalho do arquivo no motor. NÃO entra na fila global: quem chama
+ * já está na vez dele (chamar de dentro da vez é o uso certo — entrar na fila
+ * de novo seria esperar a si mesmo).
+ */
+export async function diagnosticarArquivo(file: Blob): Promise<DiagnosticoArquivo> {
+  if (file.size === 0) return { temAudio: false, temVideo: false, legivel: false };
+  const ff = await getFFmpeg();
+  const name = nomeUnico('diag', guessExt(file, 'mp4'));
+  const { dir, cleanup } = await makeInputsAvailable(ff, [{ name, data: file }]);
+  const linhas: string[] = [];
+  const h = ({ message }: { message: string }) => { linhas.push(message); };
+  ff.on('log', h);
+  try {
+    await ff.exec(['-hide_banner', '-i', `${dir}/${name}`]);
+  } catch (e) {
+    if (isCancellationError(e)) throw e;
+    /* exit != 0 é esperado (sem output) — o log já saiu */
+  } finally {
+    ff.off('log', h);
+    await cleanup();
+  }
+  return lerTrilhasDoLog(linhas);
+}
+
+/**
+ * Pras ferramentas de ÁUDIO: o texto pro cliente quando o arquivo não serve
+ * (sem som ou que não abre). null = pode processar. Na dúvida, nunca barra:
+ * se a leitura falhar por qualquer motivo, devolve null e segue como antes.
+ */
+export async function motivoSemAudio(file: Blob): Promise<string | null> {
+  if (file.size === 0) return MSG_ARQUIVO_ILEGIVEL;
+  let d: DiagnosticoArquivo;
+  try {
+    d = await diagnosticarArquivo(file);
+  } catch (e) {
+    if (isCancellationError(e)) throw e;
+    return null;
+  }
+  if (!d.legivel) return MSG_ARQUIVO_ILEGIVEL;
+  if (!d.temAudio) return MSG_SEM_AUDIO;
+  return null;
+}
+
+/** "max_volume: -91.0 dB" do volumedetect → número (null se não achar). */
+export function volumeMaximoDoLog(linhas: string[]): number | null {
+  let v: number | null = null;
+  for (const l of linhas) {
+    const m = /max_volume:\s*(-?[\d.]+|-inf)\s*dB/.exec(l);
+    if (m) v = m[1] === '-inf' ? -Infinity : parseFloat(m[1]);
+  }
+  return v;
+}
+
+/**
+ * Pico de volume do arquivo (dB). Usado no áudio JÁ reduzido pra transcrição
+ * (leve) pra pegar o arquivo todo em silêncio antes de mandar pro servidor —
+ * senão a transcrição "inventa" palavras e sai uma legenda quebrada.
+ * null = não deu pra medir (segue como antes). Mesma regra de fila do
+ * diagnosticarArquivo: chamar de dentro da vez.
+ */
+export async function volumeMaximoDb(file: Blob): Promise<number | null> {
+  try {
+    const ff = await getFFmpeg();
+    const name = nomeUnico('vol', guessExt(file, 'ogg'));
+    const { dir, cleanup } = await makeInputsAvailable(ff, [{ name, data: file }]);
+    const linhas: string[] = [];
+    const h = ({ message }: { message: string }) => { linhas.push(message); };
+    ff.on('log', h);
+    try {
+      await ff.exec(['-hide_banner', '-i', `${dir}/${name}`, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
+    } finally {
+      ff.off('log', h);
+      await cleanup();
+    }
+    return volumeMaximoDoLog(linhas);
+  } catch (e) {
+    if (isCancellationError(e)) throw e;
+    return null;
+  }
+}
+
+/** Abaixo disso o arquivo inteiro é silêncio (fala baixinha fica bem acima). */
+export const SILENCIO_MAX_DB = -50;
 
 /**
  * Disponibiliza blobs pro ffmpeg SEM ocupar heap: monta WORKERFS (leitura por
